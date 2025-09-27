@@ -1,0 +1,257 @@
+service: api
+
+provider:
+    name: aws
+    runtime: nodejs20.x
+    region: us-east-2
+    stage: ${opt:stage, 'dev'}
+    memorySize: 512
+    deploymentBucket:
+        name: jaildata-serverless-deployments-${self:provider.stage}
+    environment:
+        STAGE: ${self:provider.stage}
+        JAILDATA_TABLE: !Ref JailDataTable
+        ERROR_CACHE_TABLE: !Ref ErrorCacheTable
+        SERVICE_NAME: ${self:service}
+    iam:
+        role:
+            statements:
+                - Effect: Allow
+                  Action:
+                      - dynamodb:BatchGetItem
+                      - dynamodb:GetItem
+                      - dynamodb:PutItem
+                      - dynamodb:Query
+                      - dynamodb:UpdateItem
+                      - dynamodb:Scan
+                  Resource:
+                      - !GetAtt JailDataTable.Arn
+                      - !Sub "${JailDataTable.Arn}/index/*"
+                      - !GetAtt ErrorCacheTable.Arn
+
+                - Effect: Allow
+                  Action:
+                      - logs:CreateLogGroup
+                      - logs:CreateLogStream
+                      - logs:PutLogEvents
+                  Resource: arn:aws:logs:*:*:*
+
+                - Effect: Allow
+                  Action:
+                      - cloudwatch:PutMetricData
+                  Resource: "*"
+
+                - Effect: Allow
+                  Action:
+                      - ssm:GetParameter
+                  Resource:
+                      - arn:aws:ssm:${self:provider.region}:*:parameter/jaildata*
+
+                - Effect: Allow
+                  Action:
+                      - sns:Publish
+                  Resource:
+                      - !Ref AlertTopic
+
+    apiGateway:
+        disableDefaultEndpoint: true
+        apiKeys:
+            - test:
+                  - test-api-key
+        usagePlan:
+            - test:
+                  quota:
+                      limit: 500
+                      period: MONTH
+                  throttle:
+                      burstLimit: 5
+                      rateLimit: 2
+            - community:
+                  quota:
+                      limit: 5000
+                      period: MONTH
+                  throttle:
+                      burstLimit: 20
+                      rateLimit: 10
+
+package:
+    patterns:
+        - "handlers/data-collection.ts"
+        - "handlers/detainee.ts"
+        - "handlers/status.ts"
+
+stages:
+    default:
+        params:
+            domain: ${env:DOMAIN, 'jaildata.org'}
+
+    dev:
+        params:
+            subdomain: api-dev
+
+    prod:
+        params:
+            subdomain: api
+
+resources:
+    Resources:
+        # SNS Topic for alerts
+        AlertTopic:
+            Type: AWS::SNS::Topic
+            Properties:
+                TopicName: jaildata-alerts-${self:provider.stage}
+                DisplayName: JailData Alerts
+                Tags:
+                    - Key: Service
+                      Value: JailData
+                    - Key: Environment
+                      Value: ${self:provider.stage}
+
+        # SSM Parameter for the alert topic ARN
+        AlertTopicArnParameter:
+            Type: AWS::SSM::Parameter
+            Properties:
+                Name: /jaildata/alert-topic-arn
+                Type: String
+                Value: !Ref AlertTopic
+                Description: SNS Topic ARN for JailData alerts
+
+        # Email subscription to the alert topic
+        AlertEmailSubscription:
+            Type: AWS::SNS::Subscription
+            Properties:
+                Protocol: email
+                TopicArn: !Ref AlertTopic
+                Endpoint: ${ssm:/jaildata/alert-email}
+
+        # DynamoDB table for jail data
+        JailDataTable:
+            Type: AWS::DynamoDB::Table
+            Properties:
+                TableName: jaildata-${self:provider.stage}
+                BillingMode: PAY_PER_REQUEST
+                AttributeDefinitions:
+                    - AttributeName: detaineeId
+                      AttributeType: S
+                    - AttributeName: timestamp
+                      AttributeType: S
+                    - AttributeName: status
+                      AttributeType: S
+                    - AttributeName: createdDate
+                      AttributeType: S
+                KeySchema:
+                    - AttributeName: detaineeId
+                      KeyType: HASH
+                    - AttributeName: timestamp
+                      KeyType: RANGE
+                GlobalSecondaryIndexes:
+                    - IndexName: StatusCreatedDateIndex
+                      KeySchema:
+                          - AttributeName: status
+                            KeyType: HASH
+                          - AttributeName: createdDate
+                            KeyType: RANGE
+                      Projection:
+                          ProjectionType: ALL
+                    - IndexName: CreatedDateTimestampIndex
+                      KeySchema:
+                          - AttributeName: createdDate
+                            KeyType: HASH
+                          - AttributeName: timestamp
+                            KeyType: RANGE
+                      Projection:
+                          ProjectionType: ALL
+                Tags:
+                    - Key: Name
+                      Value: JailData Main Table
+                    - Key: Environment
+                      Value: ${self:provider.stage}
+                    - Key: Service
+                      Value: JailData
+
+        # DynamoDB table for error cache and deduplication
+        ErrorCacheTable:
+            Type: AWS::DynamoDB::Table
+            Properties:
+                TableName: jaildata-error-cache-${self:provider.stage}
+                BillingMode: PAY_PER_REQUEST
+                AttributeDefinitions:
+                    - AttributeName: errorKey
+                      AttributeType: S
+                KeySchema:
+                    - AttributeName: errorKey
+                      KeyType: HASH
+                TimeToLiveSpecification:
+                    AttributeName: ttl
+                    Enabled: true
+                Tags:
+                    - Key: Name
+                      Value: JailData Error Cache Table
+                    - Key: Environment
+                      Value: ${self:provider.stage}
+                    - Key: Service
+                      Value: AlertService
+
+        ApiGatewayBasePathMapping:
+            Type: AWS::ApiGateway::BasePathMapping
+            DependsOn: ApiGatewayMethodStatusGet
+            Properties:
+                DomainName: "${param:subdomain}.${param:domain}"
+                RestApiId:
+                    Ref: ApiGatewayRestApi
+                Stage: ${sls:stage}
+
+    Outputs:
+        TestUsagePlanId:
+            Value: !Ref ApiGatewayUsagePlanTest
+            Export:
+                Name: ${self:service}-${self:provider.stage}-TestUsagePlanId
+
+        CommunityUsagePlanId:
+            Value: !Ref ApiGatewayUsagePlanCommunity
+            Export:
+                Name: ${self:service}-${self:provider.stage}-CommunityUsagePlanId
+
+functions:
+    # Scheduled data collection function
+    dataCollection:
+        handler: handlers/data-collection.execute
+        memorySize: 1024
+        timeout: 600 # 10 minutes
+        events:
+            # Default collection at 10 AM UTC
+            - schedule:
+                  rate: cron(0 10 * * ? *)
+                  input: '{"countyId": "wake", "source": "wake-county"}'
+            # Additional configurable collections can be added here
+            # Example: 10:30 AM UTC for Mecklenburg County
+            # - schedule:
+            #       rate: cron(30 10 * * ? *)
+            #       input: '{"countyId": "mecklenburg", "source": "mecklenburg-county"}'
+
+    # Get detainee data
+    getDetainee:
+        handler: handlers/detainee.get
+        events:
+            - http:
+                  path: detainee/{detaineeId}
+                  method: get
+                  private: true
+
+    # List active detainees
+    listActiveDetainees:
+        handler: handlers/detainee.listActive
+        events:
+            - http:
+                  path: detainees/active
+                  method: get
+                  private: true
+
+    # Get status/health endpoint
+    getStatus:
+        handler: handlers/status.get
+        events:
+            - http:
+                  path: status
+                  method: get
+                  private: true
