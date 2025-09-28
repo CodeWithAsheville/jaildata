@@ -29,8 +29,8 @@ resource "aws_iam_policy" "github_actions_policy" {
           "s3:*"
         ]
         Resource = [
-          "arn:aws:s3:::jaildata-tf-state-*",
-          "arn:aws:s3:::jaildata-tf-state-*/*",
+          "arn:aws:s3:::jaildata-tf-state",
+          "arn:aws:s3:::jaildata-tf-state/*",
           "arn:aws:s3:::serverless-framework-state-*",
           "arn:aws:s3:::serverless-framework-state-*/*",
           "arn:aws:s3:::jaildata-serverless-deployments-*",
