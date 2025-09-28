@@ -25,6 +25,12 @@ module.exports = tseslint.config(
             },
         },
         rules: {
+            "no-unused-vars": "off",
+            "@typescript-eslint/no-unused-vars": ["error", {
+                "argsIgnorePattern": "^_",
+                "varsIgnorePattern": "^_",
+                "ignoreRestSiblings": true
+            }],
             "max-len": [
                 "error",
                 {
