@@ -4,6 +4,7 @@
         "@types/aws-lambda": "^8.10.147",
         "@types/jest": "^29.5.14",
         "@types/node": "^22.13.5",
+        "@types/uuid": "^10.0.0",
         "@typescript-eslint/eslint-plugin": "^8.29.0",
         "@typescript-eslint/parser": "^8.29.0",
         "eslint": "^9.24.0",
@@ -20,9 +21,11 @@
         "@aws-sdk/client-cloudwatch": "^3.782.0",
         "@aws-sdk/client-dynamodb": "^3.543.0",
         "@aws-sdk/client-sns": "^3.782.0",
+        "@aws-sdk/client-sqs": "^3.896.0",
         "@aws-sdk/client-ssm": "^3.782.0",
         "@aws-sdk/lib-dynamodb": "^3.543.0",
-        "axios": "^1.12.1"
+        "axios": "^1.12.1",
+        "uuid": "^13.0.0"
     },
     "scripts": {
         "test": "jest",
