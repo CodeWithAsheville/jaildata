@@ -13,12 +13,15 @@ provider:
         JAILDATA_TABLE: !Ref JailDataTable
         ERROR_CACHE_TABLE: !Ref ErrorCacheTable
         SERVICE_NAME: ${self:service}
+        AWS_ACCOUNT_ID: !Ref "AWS::AccountId"
+        BATCH_PROCESSING_QUEUE_URL: !Ref BatchProcessingQueue
     iam:
         role:
             statements:
                 - Effect: Allow
                   Action:
                       - dynamodb:BatchGetItem
+                      - dynamodb:BatchWriteItem
                       - dynamodb:GetItem
                       - dynamodb:PutItem
                       - dynamodb:Query
@@ -52,6 +55,16 @@ provider:
                       - sns:Publish
                   Resource:
                       - !Ref AlertTopic
+
+                - Effect: Allow
+                  Action:
+                      - sqs:SendMessage
+                      - sqs:ReceiveMessage
+                      - sqs:DeleteMessage
+                      - sqs:GetQueueAttributes
+                  Resource:
+                      - !GetAtt BatchProcessingQueue.Arn
+                      - !GetAtt BatchProcessingDeadLetterQueue.Arn
 
     apiGateway:
         disableDefaultEndpoint: true
@@ -124,46 +137,70 @@ resources:
                 TopicArn: !Ref AlertTopic
                 Endpoint: ${ssm:/jaildata/alert-email}
 
-        # DynamoDB table for jail data
+        # DynamoDB table for jail data (single table design)
         JailDataTable:
             Type: AWS::DynamoDB::Table
             Properties:
                 TableName: jaildata-${self:provider.stage}
                 BillingMode: PAY_PER_REQUEST
                 AttributeDefinitions:
-                    - AttributeName: detaineeId
+                    - AttributeName: PK
                       AttributeType: S
-                    - AttributeName: timestamp
+                    - AttributeName: SK
                       AttributeType: S
-                    - AttributeName: status
+                    - AttributeName: GSI1PK
                       AttributeType: S
-                    - AttributeName: createdDate
+                    - AttributeName: GSI1SK
                       AttributeType: S
                 KeySchema:
-                    - AttributeName: detaineeId
+                    - AttributeName: PK
                       KeyType: HASH
-                    - AttributeName: timestamp
+                    - AttributeName: SK
                       KeyType: RANGE
                 GlobalSecondaryIndexes:
-                    - IndexName: StatusCreatedDateIndex
+                    - IndexName: GSI1
                       KeySchema:
-                          - AttributeName: status
+                          - AttributeName: GSI1PK
                             KeyType: HASH
-                          - AttributeName: createdDate
-                            KeyType: RANGE
-                      Projection:
-                          ProjectionType: ALL
-                    - IndexName: CreatedDateTimestampIndex
-                      KeySchema:
-                          - AttributeName: createdDate
-                            KeyType: HASH
-                          - AttributeName: timestamp
+                          - AttributeName: GSI1SK
                             KeyType: RANGE
                       Projection:
                           ProjectionType: ALL
                 Tags:
                     - Key: Name
                       Value: JailData Main Table
+                    - Key: Environment
+                      Value: ${self:provider.stage}
+                    - Key: Service
+                      Value: JailData
+
+        # SQS queue for batch processing (handles inmate data batches)
+        BatchProcessingQueue:
+            Type: AWS::SQS::Queue
+            Properties:
+                QueueName: jaildata-batch-processing-${self:provider.stage}
+                VisibilityTimeoutSeconds: 300
+                MessageRetentionPeriod: 1209600 # 14 days
+                RedrivePolicy:
+                    deadLetterTargetArn: !GetAtt BatchProcessingDeadLetterQueue.Arn
+                    maxReceiveCount: 3
+                Tags:
+                    - Key: Name
+                      Value: JailData Batch Processing Queue
+                    - Key: Environment
+                      Value: ${self:provider.stage}
+                    - Key: Service
+                      Value: JailData
+
+        # Dead letter queue for batch processing
+        BatchProcessingDeadLetterQueue:
+            Type: AWS::SQS::Queue
+            Properties:
+                QueueName: jaildata-batch-processing-dlq-${self:provider.stage}
+                MessageRetentionPeriod: 1209600 # 14 days
+                Tags:
+                    - Key: Name
+                      Value: JailData Batch Processing Dead Letter Queue
                     - Key: Environment
                       Value: ${self:provider.stage}
                     - Key: Service
@@ -213,37 +250,151 @@ resources:
                 Name: ${self:service}-${self:provider.stage}-CommunityUsagePlanId
 
 functions:
-    # Scheduled data collection function
-    dataCollection:
-        handler: handlers/data-collection.execute
+    # Manual data collection trigger
+    dataCollectionManual:
+        handler: handlers/data-collection.collect
         memorySize: 1024
         timeout: 600 # 10 minutes
         events:
-            # Default collection at 10 AM UTC
+            - http:
+                  path: /collect/{facilityId}
+                  method: post
+                  private: true
+
+    # Scheduled data collection functions for different facilities
+    # To add a new facility: copy a function, change the name, set the facility ID in the input, and pick a unique schedule
+
+    # Wake County - 10:00 AM UTC daily
+    dataCollectionWake:
+        handler: handlers/data-collection.collectScheduled
+        memorySize: 1024
+        timeout: 600 # 10 minutes
+        events:
             - schedule:
                   rate: cron(0 10 * * ? *)
-                  input: '{"countyId": "wake", "source": "wake-county"}'
-            # Additional configurable collections can be added here
-            # Example: 10:30 AM UTC for Mecklenburg County
-            # - schedule:
-            #       rate: cron(30 10 * * ? *)
-            #       input: '{"countyId": "mecklenburg", "source": "mecklenburg-county"}'
+                  enabled: true
+                  name: jaildata-collection-wake-${self:provider.stage}
+                  description: "Daily Wake County jail data collection"
+                  input: '{"facilityId": "wake"}'
 
-    # Get detainee data
-    getDetainee:
-        handler: handlers/detainee.get
+    # Buncombe County - 10:15 AM UTC daily
+    dataCollectionBuncombe:
+        handler: handlers/data-collection.collectScheduled
+        memorySize: 1024
+        timeout: 600 # 10 minutes
+        events:
+            - schedule:
+                  rate: cron(15 10 * * ? *)
+                  enabled: true
+                  name: jaildata-collection-buncombe-${self:provider.stage}
+                  description: "Daily Buncombe County jail data collection"
+                  input: '{"facilityId": "buncombe"}'
+
+    # DISABLED: Mecklenburg County - Need API ID (currently 0)
+    dataCollectionMecklenburg:
+        handler: handlers/data-collection.collectScheduled
+        memorySize: 1024
+        timeout: 600 # 10 minutes
+        events:
+            - schedule:
+                  rate: cron(30 10 * * ? *)
+                  enabled: false # DISABLED: Need API ID
+                  name: jaildata-collection-mecklenburg-${self:provider.stage}
+                  description: "Daily Mecklenburg County jail data collection"
+                  input: '{"facilityId": "mecklenburg"}'
+
+    # DISABLED: Durham County - Need API ID (currently 0)
+    dataCollectionDurham:
+        handler: handlers/data-collection.collectScheduled
+        memorySize: 1024
+        timeout: 600 # 10 minutes
+        events:
+            - schedule:
+                  rate: cron(0 11 * * ? *)
+                  enabled: false # DISABLED: Need API ID
+                  name: jaildata-collection-durham-${self:provider.stage}
+                  description: "Daily Durham County jail data collection"
+                  input: '{"facilityId": "durham"}'
+
+    # DISABLED: Orange County - Need API ID (currently 0)
+    dataCollectionOrange:
+        handler: handlers/data-collection.collectScheduled
+        memorySize: 1024
+        timeout: 600 # 10 minutes
+        events:
+            - schedule:
+                  rate: cron(30 11 * * ? *)
+                  enabled: false # DISABLED: Need API ID
+                  name: jaildata-collection-orange-${self:provider.stage}
+                  description: "Daily Orange County jail data collection"
+                  input: '{"facilityId": "orange"}'
+
+    # DISABLED: Guilford County - Need API ID (currently 0)
+    dataCollectionGuilford:
+        handler: handlers/data-collection.collectScheduled
+        memorySize: 1024
+        timeout: 600 # 10 minutes
+        events:
+            - schedule:
+                  rate: cron(0 12 * * ? *)
+                  enabled: false # DISABLED: Need API ID
+                  name: jaildata-collection-guilford-${self:provider.stage}
+                  description: "Daily Guilford County jail data collection"
+                  input: '{"facilityId": "guilford"}'
+
+    # Batch processing function (triggered by SQS)
+    batchProcessing:
+        handler: handlers/batch-processing.processBatch
+        memorySize: 512
+        timeout: 300 # 5 minutes
+        events:
+            - sqs:
+                  arn: !GetAtt BatchProcessingQueue.Arn
+                  batchSize: 10
+                  maximumBatchingWindowInSeconds: 30
+
+    # Get inmates by facility (with status filter)
+    getInmatesByFacility:
+        handler: handlers/detainee.getInmatesByFacility
         events:
             - http:
-                  path: detainee/{detaineeId}
+                  path: inmates/{facilityId}
                   method: get
                   private: true
 
-    # List active detainees
-    listActiveDetainees:
-        handler: handlers/detainee.listActive
+    # Get all active inmates across facilities
+    getAllActiveInmates:
+        handler: handlers/detainee.getAllActiveInmates
         events:
             - http:
-                  path: detainees/active
+                  path: inmates/active
+                  method: get
+                  private: true
+
+    # Search inmates by last name within a facility
+    searchInmatesByName:
+        handler: handlers/detainee.searchInmatesByName
+        events:
+            - http:
+                  path: inmates/{facilityId}/search
+                  method: get
+                  private: true
+
+    # Get specific inmate record
+    getSpecificInmate:
+        handler: handlers/detainee.getSpecificInmate
+        events:
+            - http:
+                  path: inmates/{facilityId}/{lastName}/{firstName}/{recordDate}
+                  method: get
+                  private: true
+
+    # Get specific inmate record with middle name
+    getSpecificInmateWithMiddle:
+        handler: handlers/detainee.getSpecificInmate
+        events:
+            - http:
+                  path: inmates/{facilityId}/{lastName}/{firstName}/{middleName}/{recordDate}
                   method: get
                   private: true
 
