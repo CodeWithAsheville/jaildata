@@ -2,6 +2,30 @@ provider "aws" {
   region = var.aws_region
 }
 
+# SSM Parameters
+# These are populated interactively during bootstrap
+
+resource "aws_ssm_parameter" "alert_email" {
+  name        = "/jaildata/alert-email"
+  type        = "String"
+  value       = var.alert_email
+  description = "E-mail address for JailData alerts"
+}
+
+resource "aws_ssm_parameter" "jail_data_base_url" {
+  name        = "/jaildata/base-url"
+  type        = "String"
+  value       = var.jail_data_base_url
+  description = "Base URL for external jail data API endpoints"
+}
+
+resource "aws_ssm_parameter" "buncombe_api_id" {
+  name        = "/jaildata/facilities/buncombe/api-id"
+  type        = "String"
+  value       = var.buncombe_api_id
+  description = "API ID for Buncombe County jail data system"
+}
+
 # Create IAM user for GitHub Actions
 resource "aws_iam_user" "github_actions" {
   name = "github-actions-jaildata"
@@ -331,4 +355,32 @@ output "terraform_state_bucket" {
 output "terraform_state_lock_table" {
   description = "DynamoDB table for Terraform state locking"
   value       = aws_dynamodb_table.terraform_state_lock.name
+}
+
+# Reminder about SSM parameter configuration
+output "ssm_parameters_created" {
+  description = "SSM parameters created by bootstrap"
+  value = <<EOT
+
+✅ SSM Parameters Successfully Created ✅
+
+The following SSM parameters have been created with the values you provided:
+
+1. /jaildata/alert-email
+   - Purpose: Email address for JailData alerts
+
+2. /jaildata/base-url
+   - Purpose: Base URL for external jail data API endpoints
+
+3. /jaildata/facilities/buncombe/api-id
+   - Purpose: API ID for Buncombe County jail data system
+
+These parameters are now ready for use by:
+- CI/CD workflows (SSM parameter verification will pass)
+- Main Terraform deployments (dev/prod environments)
+- Serverless Lambda functions (runtime configuration)
+
+Note: The alert-topic-arn parameter is managed by the Serverless Framework deployment.
+
+EOT
 }

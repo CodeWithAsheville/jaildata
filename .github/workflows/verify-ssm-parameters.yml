@@ -57,8 +57,8 @@ jobs:
                     if ! PARAM_VALUE=$(aws ssm get-parameter --name "$param" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null); then
                       echo "::error::Missing required SSM parameter: $param"
                       MISSING_PARAMS=1
-                    elif [ "$PARAM_VALUE" = "CHANGE_ME" ] || [ -z "$PARAM_VALUE" ]; then
-                      echo "::error::SSM parameter $param has not been configured (value is empty or placeholder)"
+                    elif [ -z "$PARAM_VALUE" ]; then
+                      echo "::error::SSM parameter $param exists but has an empty value"
                       MISSING_PARAMS=1
                     else
                       echo "✅ Parameter $param is properly configured"
@@ -71,9 +71,9 @@ jobs:
                     echo "::error::❌ One or more required SSM parameters are missing or misconfigured"
                     echo ""
                     echo "💡 To fix this:"
-                    echo "   1. Ensure Terraform has been applied to create the parameter structure"
-                    echo "   2. Manually set the actual values in AWS Systems Manager Parameter Store"
-                    echo "   3. Replace any 'CHANGE_ME' placeholder values with real configuration"
+                    echo "   1. Ensure bootstrap Terraform has been applied to create the parameters"
+                    echo "   2. Run 'terraform apply' in the infra/terraform/bootstrap directory"
+                    echo "   3. Provide the required values when prompted during bootstrap"
                     exit 1
                   fi
 
