@@ -4,11 +4,11 @@ This is the backend API for the Detention Data project, built with the Serverles
 
 ## Architecture
 
--   **AWS Lambda**: Serverless functions for API endpoints and scheduled data collection
--   **Amazon DynamoDB**: NoSQL database for storing detention data
--   **Amazon API Gateway**: REST API with API key authentication
--   **AWS EventBridge**: Scheduled triggers for data collection
--   **AWS CloudWatch**: Logging and monitoring
+- **AWS Lambda**: Serverless functions for API endpoints and scheduled data collection
+- **Amazon DynamoDB**: NoSQL database for storing detention data
+- **Amazon API Gateway**: REST API with API key authentication
+- **AWS EventBridge**: Scheduled triggers for data collection
+- **AWS CloudWatch**: Logging and monitoring
 
 ## Project Structure
 
@@ -27,13 +27,13 @@ serverless/
 
 ## API Endpoints
 
--   `GET /status` - Health check
--   `GET /detainee/{detaineeId}` - Get detainee records
--   `GET /detainees/active` - List active detainees
+- `GET /status` - Health check
+- `GET /detainee/{detaineeId}` - Get detainee records
+- `GET /detainees/active` - List active detainees
 
 ## Scheduled Functions
 
--   **Data Collection**: Runs daily at 10 AM UTC to collect detention data from configured county sources
+- **Data Collection**: Runs daily at 10 AM UTC to collect detention data from configured county sources
 
 ## Development
 

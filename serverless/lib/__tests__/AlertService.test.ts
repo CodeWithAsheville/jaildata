@@ -200,6 +200,8 @@ describe("AlertService", () => {
             expect(AlertCategory.PORTAL).toBe("PORTAL");
             expect(AlertCategory.QUEUE).toBe("QUEUE");
             expect(AlertCategory.SYSTEM).toBe("SYS");
+            expect(AlertCategory.DATA_COLLECTION).toBe("DATA_COLLECTION");
+            expect(AlertCategory.BATCH_PROCESSING).toBe("BATCH_PROCESSING");
         });
     });
 

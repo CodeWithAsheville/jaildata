@@ -46,6 +46,8 @@ export enum AlertCategory {
     PORTAL = "PORTAL",
     QUEUE = "QUEUE",
     SYSTEM = "SYS",
+    DATA_COLLECTION = "DATA_COLLECTION",
+    BATCH_PROCESSING = "BATCH_PROCESSING",
 }
 
 // Error context to provide additional information

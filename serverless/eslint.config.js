@@ -26,11 +26,14 @@ module.exports = tseslint.config(
         },
         rules: {
             "no-unused-vars": "off",
-            "@typescript-eslint/no-unused-vars": ["error", {
-                "argsIgnorePattern": "^_",
-                "varsIgnorePattern": "^_",
-                "ignoreRestSiblings": true
-            }],
+            "@typescript-eslint/no-unused-vars": [
+                "error",
+                {
+                    argsIgnorePattern: "^_",
+                    varsIgnorePattern: "^_",
+                    ignoreRestSiblings: true,
+                },
+            ],
             "max-len": [
                 "error",
                 {
@@ -67,5 +70,5 @@ module.exports = tseslint.config(
         rules: {
             "@typescript-eslint/no-require-imports": "off",
         },
-    }
+    },
 );

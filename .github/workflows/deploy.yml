@@ -22,37 +22,10 @@ jobs:
     verify-ssm-parameters:
         name: Verify SSM Parameters
         needs: determine-environment
-        runs-on: ubuntu-latest
-        steps:
-            - name: Configure AWS credentials
-              uses: aws-actions/configure-aws-credentials@v4
-              with:
-                  aws-access-key-id: ${{ needs.determine-environment.outputs.environment_name == 'dev' && secrets.DEV_AWS_ACCESS_KEY_ID || secrets.PROD_AWS_ACCESS_KEY_ID }}
-                  aws-secret-access-key: ${{ needs.determine-environment.outputs.environment_name == 'dev' && secrets.DEV_AWS_SECRET_ACCESS_KEY || secrets.PROD_AWS_SECRET_ACCESS_KEY }}
-                  aws-region: us-east-2
-
-            - name: Check required SSM parameters
-              run: |
-                  REQUIRED_PARAMS=(
-                    "/jaildata/alert-email"
-                  )
-
-                  MISSING_PARAMS=0
-
-                  for param in "${REQUIRED_PARAMS[@]}"; do
-                    echo "Checking SSM parameter: $param"
-                    if ! aws ssm get-parameter --name "$param" --with-decryption 2>/dev/null; then
-                      echo "::error::Missing required SSM parameter: $param"
-                      MISSING_PARAMS=1
-                    fi
-                  done
-
-                  if [ $MISSING_PARAMS -ne 0 ]; then
-                    echo "::error::One or more required SSM parameters are missing"
-                    exit 1
-                  fi
-
-                  echo "All required SSM parameters are present"
+        uses: ./.github/workflows/verify-ssm-parameters.yml
+        with:
+          environment: ${{ needs.determine-environment.outputs.environment_name }}
+        secrets: inherit
 
     terraform-apply:
         name: Terraform Apply
