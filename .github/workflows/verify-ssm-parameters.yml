@@ -1,0 +1,80 @@
+name: Verify SSM Parameters
+
+on:
+    workflow_call:
+        inputs:
+            environment:
+                description: "Environment to verify (dev/prod)"
+                required: true
+                type: string
+            aws-region:
+                description: "AWS Region"
+                required: false
+                type: string
+                default: "us-east-2"
+        secrets:
+            DEV_AWS_ACCESS_KEY_ID:
+                description: "AWS Access Key ID for dev environment"
+                required: false
+            DEV_AWS_SECRET_ACCESS_KEY:
+                description: "AWS Secret Access Key for dev environment"
+                required: false
+            PROD_AWS_ACCESS_KEY_ID:
+                description: "AWS Access Key ID for prod environment"
+                required: false
+            PROD_AWS_SECRET_ACCESS_KEY:
+                description: "AWS Secret Access Key for prod environment"
+                required: false
+
+jobs:
+    verify-ssm-parameters:
+        name: Verify SSM Parameters (${{ inputs.environment }})
+        runs-on: ubuntu-latest
+        steps:
+            - name: Configure AWS credentials
+              uses: aws-actions/configure-aws-credentials@v4
+              with:
+                  aws-access-key-id: ${{ inputs.environment == 'dev' && secrets.DEV_AWS_ACCESS_KEY_ID || secrets.PROD_AWS_ACCESS_KEY_ID }}
+                  aws-secret-access-key: ${{ inputs.environment == 'dev' && secrets.DEV_AWS_SECRET_ACCESS_KEY || secrets.PROD_AWS_SECRET_ACCESS_KEY }}
+                  aws-region: ${{ inputs.aws-region }}
+
+            - name: Check required SSM parameters
+              run: |
+                  REQUIRED_PARAMS=(
+                    "/jaildata/base-url"
+                    "/jaildata/alert-email"
+                    "/jaildata/alert-topic-arn"
+                    "/jaildata/facilities/buncombe/api-id"
+                  )
+
+                  MISSING_PARAMS=0
+
+                  echo "🔍 Verifying SSM parameters for ${{ inputs.environment }} environment..."
+                  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+                  for param in "${REQUIRED_PARAMS[@]}"; do
+                    echo "Checking SSM parameter: $param"
+                    if ! PARAM_VALUE=$(aws ssm get-parameter --name "$param" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null); then
+                      echo "::error::Missing required SSM parameter: $param"
+                      MISSING_PARAMS=1
+                    elif [ "$PARAM_VALUE" = "CHANGE_ME" ] || [ -z "$PARAM_VALUE" ]; then
+                      echo "::error::SSM parameter $param has not been configured (value is empty or placeholder)"
+                      MISSING_PARAMS=1
+                    else
+                      echo "✅ Parameter $param is properly configured"
+                    fi
+                  done
+
+                  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+                  if [ $MISSING_PARAMS -ne 0 ]; then
+                    echo "::error::❌ One or more required SSM parameters are missing or misconfigured"
+                    echo ""
+                    echo "💡 To fix this:"
+                    echo "   1. Ensure Terraform has been applied to create the parameter structure"
+                    echo "   2. Manually set the actual values in AWS Systems Manager Parameter Store"
+                    echo "   3. Replace any 'CHANGE_ME' placeholder values with real configuration"
+                    exit 1
+                  fi
+
+                  echo "🎉 All required SSM parameters are properly configured for ${{ inputs.environment }}!"
