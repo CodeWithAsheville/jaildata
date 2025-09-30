@@ -243,6 +243,17 @@ resource "aws_iam_policy" "github_actions_policy" {
           "sns:*"
         ]
         Resource = "arn:aws:sns:${var.aws_region}:*:jaildata-alerts-*"
+      },
+
+      # SQS permissions for Serverless Framework
+      {
+        Effect = "Allow"
+        Action = [
+          "sqs:*"
+        ]
+        Resource = [
+          "arn:aws:sqs:${var.aws_region}:*:jaildata-*"
+        ]
       }
     ]
   })

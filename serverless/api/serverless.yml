@@ -351,7 +351,7 @@ functions:
             - sqs:
                   arn: !GetAtt BatchProcessingQueue.Arn
                   batchSize: 10
-                  maximumBatchingWindowInSeconds: 30
+                  maximumBatchingWindow: 30
 
     # Get inmates by facility (with status filter)
     getInmatesByFacility:
